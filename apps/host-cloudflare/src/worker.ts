@@ -69,6 +69,7 @@ const provisionErxes = async (
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 
   let input: { endpoint?: unknown; cookie?: unknown };
+  // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: malformed external JSON becomes a 400 response
   try {
     input = (await request.json()) as { endpoint?: unknown; cookie?: unknown };
   } catch {
