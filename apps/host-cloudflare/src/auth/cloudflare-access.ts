@@ -60,6 +60,9 @@ export const principalFromAccessClaims = (
  */
 export const makeAccessVerifier = (config: CloudflareConfig) => {
   const issuer = `https://${config.accessTeamDomain}`;
+  const cloudflareOsKey = config.cloudflareOsAuthSecret
+    ? new TextEncoder().encode(config.cloudflareOsAuthSecret)
+    : null;
   // Cached, lazily-fetched team signing keys; jose handles rotation + caching.
   const jwks = config.enableDevAuth
     ? null
@@ -82,6 +85,38 @@ export const makeAccessVerifier = (config: CloudflareConfig) => {
 
   const verify = (request: Request): Effect.Effect<Principal | null> =>
     Effect.gen(function* () {
+      if (cloudflareOsKey) {
+        const authorization = request.headers.get("Authorization");
+        const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : null;
+        if (token) {
+          const verified = yield* Effect.tryPromise({
+            try: () =>
+              jwtVerify(token, cloudflareOsKey, {
+                issuer: "cloudflare-os",
+                audience: "executor",
+                algorithms: ["HS256"],
+              }),
+            catch: () => "invalid cloudflare os assertion",
+          }).pipe(Effect.orElseSucceed(() => null));
+          const subject = verified?.payload.sub;
+          const organizationId = verified?.payload.org;
+          const email = typeof verified?.payload.email === "string" ? verified.payload.email : "";
+          if (typeof subject === "string" && typeof organizationId === "string") {
+            return {
+              kind: "member",
+              accountId: subject,
+              organizationId,
+              organizationName: organizationId,
+              organizationSlug: config.organizationSlug,
+              email,
+              name: email || null,
+              avatarUrl: null,
+              roles: ["member"],
+            };
+          }
+        }
+      }
+
       if (config.enableDevAuth) return devPrincipal;
       if (!jwks) return null;
       const token = request.headers.get("Cf-Access-Jwt-Assertion");

@@ -60,6 +60,11 @@ Now visiting the Worker prompts an Access login; the Worker validates the issued
 JWT on every request. Unauthenticated requests return 401. MCP clients present
 an Access JWT or `Cf-Access-Client-Id`/`-Secret` service-token headers.
 
+A Cloudflare OS deployment can also set the same `CLOUDFLARE_OS_AUTH_SECRET`
+secret on both Workers. Exempt only `/os/*` from the Access application: those
+routes accept short-lived, signed per-user assertions and expose only Erxes
+connection provisioning plus MCP.
+
 The Access values are live Worker variables, not values in `wrangler.jsonc`.
 Wrangler's `keep_vars` option preserves them during later code deploys. Run the
 command above again whenever you need to change them.

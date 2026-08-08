@@ -40,6 +40,86 @@ const accessConfigErrorResponse = (missingVars: readonly string[]): Response =>
     },
   });
 
+const ERXES_INTEGRATION = "erxes-officenext";
+
+const executorRequest = (
+  original: Request,
+  path: string,
+  method: string,
+  body?: unknown,
+): Request => {
+  const url = new URL(original.url);
+  url.pathname = path;
+  url.search = "";
+  const headers = new Headers();
+  const authorization = original.headers.get("Authorization");
+  if (authorization) headers.set("Authorization", authorization);
+  if (body !== undefined) headers.set("Content-Type", "application/json");
+  return new Request(url, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+};
+
+const provisionErxes = async (
+  request: Request,
+  app: (request: Request) => Promise<Response>,
+): Promise<Response> => {
+  if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
+  let input: { endpoint?: unknown; cookie?: unknown };
+  try {
+    input = (await request.json()) as { endpoint?: unknown; cookie?: unknown };
+  } catch {
+    return new Response("Invalid request", { status: 400 });
+  }
+  if (
+    typeof input.endpoint !== "string" ||
+    typeof input.cookie !== "string" ||
+    !input.cookie.startsWith("auth-token=") ||
+    input.cookie.includes("\r") ||
+    input.cookie.includes("\n")
+  ) {
+    return new Response("Invalid request", { status: 400 });
+  }
+
+  const existing = await app(
+    executorRequest(request, `/api/graphql/integrations/${ERXES_INTEGRATION}`, "GET"),
+  );
+  if (!existing.ok) return existing;
+  if ((await existing.json()) === null) {
+    const created = await app(
+      executorRequest(request, "/api/graphql/integrations", "POST", {
+        endpoint: input.endpoint,
+        slug: ERXES_INTEGRATION,
+        name: "OfficeNext",
+        description: "OfficeNext Erxes GraphQL API",
+        authenticationTemplate: [
+          {
+            slug: "cookie",
+            type: "apiKey",
+            headers: { Cookie: [{ type: "variable", name: "token" }] },
+          },
+        ],
+      }),
+    );
+    if (!created.ok && created.status !== 409) return created;
+  }
+
+  return app(
+    executorRequest(request, "/api/connections", "POST", {
+      owner: "user",
+      name: ERXES_INTEGRATION,
+      integration: ERXES_INTEGRATION,
+      template: "cookie",
+      value: input.cookie,
+      identityLabel: "OfficeNext",
+      description: "Your OfficeNext account",
+    }),
+  );
+};
+
 export default {
   fetch: async (request: Request, env: CloudflareEnv, ctx: ExecutionContext): Promise<Response> => {
     const missingAccessVars = missingCloudflareAccessVars(env);
@@ -48,7 +128,15 @@ export default {
     }
 
     const serve = await resolveHandler(env);
-    if (new URL(request.url).pathname === "/mcp") {
+    const url = new URL(request.url);
+    if (url.pathname === "/os/mcp") {
+      url.pathname = "/mcp";
+      return serve.mcp(new Request(url, request), env, ctx);
+    }
+    if (url.pathname === "/os/provision") {
+      return provisionErxes(request, serve.app);
+    }
+    if (url.pathname === "/mcp") {
       return serve.mcp(request, env, ctx);
     }
     return serve.app(request);

@@ -1515,6 +1515,7 @@ export const createExecutorMcpServer = <E extends Cause.YieldableError>(
               .optional()
               .describe('The skill to fetch, e.g. "execute". Omit to list available skills.'),
           },
+          annotations: { readOnlyHint: true },
         },
         ({ name }) =>
           runToolEffect(Effect.succeed(skillsResult(name, executeInventory, skillCatalog))),
