@@ -4,6 +4,7 @@
   "compatibility_date": "2025-04-01",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/worker.ts",
+  "routes": [{ "pattern": "executor-erxes-os.darjs.dev", "custom_domain": true }],
   // Access configuration is set per installation after the first deploy.
   // Preserve those live bindings when this source config does not declare them.
   "keep_vars": true,
@@ -29,7 +30,7 @@
     {
       "binding": "DB",
       "database_name": "executor",
-      "database_id": "ae748ca1-032c-4427-a1a0-fe39db77d1a9",
+      "database_id": "8e0f791e-c9fa-4ce0-a3dd-fa36a03ca102",
     },
   ],
   // Plugin blob seam backend: multi-MB values (resolved OpenAPI specs,
