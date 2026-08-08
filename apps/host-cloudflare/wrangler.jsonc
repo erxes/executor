@@ -72,8 +72,13 @@
   // secret-encryption key) is a SECRET, set it with
   // `wrangler secret put EXECUTOR_SECRET_KEY`, never in vars.
   "vars": {
+    // Keep normal Executor routes fail-closed until a real Access app replaces these values.
+    // Signed /os/* calls use CLOUDFLARE_OS_AUTH_SECRET instead.
+    "ACCESS_TEAM_DOMAIN": "darjs.cloudflareaccess.com",
+    "ACCESS_AUD": "4b0e36b2e0b981ad929a4657fabe04e855deb8bf77636f259f26f73dc822ae88",
     "ACCESS_NAME_CLAIM": "name",
     "ACCESS_GROUPS_CLAIM": "groups",
+    "ADMIN_EMAILS": "darjsavid@gmail.com",
     // Never preserve a production dev-auth override through keep_vars.
     "ENABLE_DEV_AUTH": "false",
     "SELF_HOSTED_ORG_ID": "default",
