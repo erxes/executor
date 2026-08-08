@@ -47,6 +47,8 @@ export interface CloudflareEnv {
   readonly SELF_HOSTED_ORG_SLUG?: string;
   /** At-rest secret-encryption key (a `wrangler secret`, NOT a var). */
   readonly EXECUTOR_SECRET_KEY?: string;
+  /** Shared secret used to verify short-lived Cloudflare OS user assertions. */
+  readonly CLOUDFLARE_OS_AUTH_SECRET?: string;
   readonly ALLOW_LOCAL_NETWORK?: string;
   readonly VITE_PUBLIC_SITE_URL?: string;
   /**
@@ -69,6 +71,7 @@ export interface CloudflareConfig {
   /** URL slug for org-prefixed console paths (`/<slug>/policies`). */
   readonly organizationSlug: string;
   readonly secretKey: string;
+  readonly cloudflareOsAuthSecret?: string;
   readonly allowLocalNetwork: boolean;
   /** Explicit web base URL (`VITE_PUBLIC_SITE_URL`). Unset on a Worker with no
    *  static URL — the per-request origin is used instead (see RequestWebOrigin). */
@@ -137,6 +140,11 @@ export const loadConfig = (env: CloudflareConfigEnv): CloudflareConfig => {
       "EXECUTOR_SECRET_KEY must be set (wrangler secret put EXECUTOR_SECRET_KEY) — it encrypts stored secrets at rest in D1",
     );
   }
+  const cloudflareOsAuthSecret = env.CLOUDFLARE_OS_AUTH_SECRET?.trim();
+  if (cloudflareOsAuthSecret && cloudflareOsAuthSecret.length < 32) {
+    // oxlint-disable-next-line executor/no-try-catch-or-throw, executor/no-error-constructor -- boundary: weak shared auth would let callers forge user identity
+    throw new Error("CLOUDFLARE_OS_AUTH_SECRET must be at least 32 characters when set");
+  }
   const enableDevAuth = env.ENABLE_DEV_AUTH === "true";
   const accessTeamDomain = normalizeAccessTeamDomain(env.ACCESS_TEAM_DOMAIN);
   const accessAud = (env.ACCESS_AUD ?? "").trim();
@@ -165,6 +173,7 @@ export const loadConfig = (env: CloudflareConfigEnv): CloudflareConfig => {
     organizationName: env.SELF_HOSTED_ORG_NAME ?? "Default",
     organizationSlug: resolveOrgSlug(env.SELF_HOSTED_ORG_SLUG),
     secretKey,
+    cloudflareOsAuthSecret,
     allowLocalNetwork: env.ALLOW_LOCAL_NETWORK === "true",
     // Pinned origin via the shared resolver. A Worker receives no PaaS platform
     // vars (env: {} — there is nothing to detect), so only the explicit

@@ -1549,6 +1549,7 @@ export const createExecutorMcpServer = <E extends Cause.YieldableError>(
                 'A doc from this server\'s own catalog, e.g. "execute" — not a path or an outside skill name. Omit to list the catalog.',
               ),
           },
+          annotations: { readOnlyHint: true },
         },
         ({ name }) =>
           runToolEffect(Effect.succeed(skillsResult(name, executeInventory, skillCatalog))),
