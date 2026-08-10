@@ -1305,6 +1305,21 @@ describe("graphqlPlugin generates valid operations against rich schemas (#1146)"
     }),
   );
 
+  it.effect("describes nested return fields for caller-supplied selections", () =>
+    Effect.gen(function* () {
+      const { executor } = yield* setup("gitlab_output_shape");
+
+      const schema = yield* executor.tools.schema(
+        toolAddr("gitlab_output_shape", "main", "query.currentUser"),
+      );
+
+      expect(schema?.outputTypeScript).toContain("currentUser");
+      expect(schema?.outputTypeScript).toContain("mergeRequests");
+      expect(schema?.outputTypeScript).toContain("nodes");
+      expect(schema?.outputTypeScript).toContain("title");
+    }),
+  );
+
   it.effect("a caller-supplied `select` fetches nested/list data and stays valid", () =>
     Effect.gen(function* () {
       const { server, executor } = yield* setup("gitlab_select");

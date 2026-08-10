@@ -395,6 +395,78 @@ const buildDefaultSelectionSet = (
   return leaves.length > 0 ? `{ ${leaves.join(" ")} }` : "{ __typename }";
 };
 
+// A GraphQL call can return any caller-selected subset, so every property stays optional and
+// every object permits extra fields. The bounded expansion gives tools.describe enough real type
+// information to author `select` without copying an unbounded schema into every tool row.
+const MAX_OUTPUT_SHAPE_DEPTH = 3;
+
+const outputScalarToJsonSchema = (name: string): Record<string, unknown> => {
+  if (name === "Int") return { type: "integer" };
+  if (name === "Float") return { type: "number" };
+  if (name === "Boolean") return { type: "boolean" };
+  if (name === "JSON") return {};
+  return {
+    type: "string",
+    ...(name === "String" || name === "ID"
+      ? {}
+      : {
+          description: `Custom scalar: ${name}`,
+        }),
+  };
+};
+
+const outputTypeRefToJsonSchema = (
+  ref: IntrospectionTypeRef,
+  types: ReadonlyMap<string, IntrospectionType>,
+  depth = 0,
+  ancestors: ReadonlySet<string> = new Set(),
+): Record<string, unknown> => {
+  if (ref.kind === "NON_NULL" && ref.ofType) {
+    return outputTypeRefToJsonSchema(ref.ofType, types, depth, ancestors);
+  }
+  if (ref.kind === "LIST") {
+    return {
+      type: "array",
+      items: ref.ofType ? outputTypeRefToJsonSchema(ref.ofType, types, depth, ancestors) : {},
+    };
+  }
+
+  const typeName = unwrapTypeName(ref);
+  const type = types.get(typeName);
+  if (type?.kind === "ENUM") {
+    return { type: "string", enum: type.enumValues?.map((value) => value.name) ?? [] };
+  }
+  if (type?.kind === "SCALAR" || ref.kind === "SCALAR") {
+    return outputScalarToJsonSchema(typeName);
+  }
+  if (!type?.fields || depth >= MAX_OUTPUT_SHAPE_DEPTH || ancestors.has(typeName)) {
+    return { type: "object", description: `GraphQL type ${typeName}`, additionalProperties: true };
+  }
+
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(typeName);
+  const properties = Object.fromEntries(
+    type.fields
+      .filter((field) => !field.name.startsWith("__"))
+      .map((field) => [
+        field.name,
+        outputTypeRefToJsonSchema(field.type, types, depth + 1, nextAncestors),
+      ]),
+  );
+  return { type: "object", properties, additionalProperties: true };
+};
+
+const buildOutputSchema = (
+  field: IntrospectionField,
+  types: ReadonlyMap<string, IntrospectionType>,
+): Record<string, unknown> => ({
+  type: "object",
+  properties: {
+    [field.name]: outputTypeRefToJsonSchema(field.type, types),
+  },
+  additionalProperties: true,
+});
+
 // Name every generated operation: some servers reject anonymous operations, and
 // APM tooling keys traces off the operation name. Field names are already valid
 // GraphQL name tokens, so the upper-cased field name is a safe operation name.
@@ -443,6 +515,7 @@ interface PreparedOperation {
   readonly toolName: string;
   readonly description: string;
   readonly inputSchema: unknown;
+  readonly outputSchema?: unknown;
   readonly binding: OperationBinding;
 }
 
@@ -529,6 +602,7 @@ const prepareOperations = (
         Option.getOrUndefined(extracted.inputSchema),
         extracted.returnTypeName,
       ),
+      ...(entry ? { outputSchema: buildOutputSchema(entry.field, typeMap) } : {}),
       binding,
     };
   });
@@ -571,6 +645,7 @@ const buildToolDefs = (prepared: readonly PreparedOperation[]): readonly ToolDef
     name: ToolName.make(p.toolName),
     description: p.description,
     inputSchema: p.inputSchema,
+    ...(p.outputSchema !== undefined ? { outputSchema: p.outputSchema } : {}),
     annotations: annotationsFor(p.binding),
   }));
 
