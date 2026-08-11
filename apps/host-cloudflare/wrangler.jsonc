@@ -81,8 +81,8 @@
     "ADMIN_EMAILS": "darjsavid@gmail.com",
     // Never preserve a production dev-auth override through keep_vars.
     "ENABLE_DEV_AUTH": "false",
-    "SELF_HOSTED_ORG_ID": "default",
-    "SELF_HOSTED_ORG_NAME": "Default",
+    "SELF_HOSTED_ORG_ID": "officenext.erxes.io",
+    "SELF_HOSTED_ORG_NAME": "OfficeNext",
     // VITE_PUBLIC_SITE_URL is intentionally unset: with no static URL the worker
     // derives the web base URL from each request's origin (RequestWebOrigin), so
     // secret/OAuth handoff links match whatever host the user actually reached.
