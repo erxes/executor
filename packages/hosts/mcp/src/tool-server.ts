@@ -1491,6 +1491,7 @@ export const createExecutorMcpServer = <E extends Cause.YieldableError>(
         {
           description,
           inputSchema: { code: z.string().trim().min(1) },
+          annotations: { readOnlyHint: true },
         },
         ({ code }, extra) => runToolEffect(executeCode(code, extra)),
       ),
@@ -1549,6 +1550,7 @@ export const createExecutorMcpServer = <E extends Cause.YieldableError>(
                 .describe("Optional JSON-encoded response content for form elicitations")
                 .default("{}"),
             },
+            annotations: { readOnlyHint: true },
           },
           ({ executionId, action, content: rawContent }, extra) =>
             runToolEffect(
