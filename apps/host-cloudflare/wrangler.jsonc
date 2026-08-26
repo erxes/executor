@@ -4,7 +4,6 @@
   "compatibility_date": "2025-04-01",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/worker.ts",
-  "routes": [{ "pattern": "executor-erxes-os.darjs.dev", "custom_domain": true }],
   // Access configuration is set per installation after the first deploy.
   // Preserve those live bindings when this source config does not declare them.
   "keep_vars": true,
@@ -30,7 +29,7 @@
     {
       "binding": "DB",
       "database_name": "executor",
-      "database_id": "8e0f791e-c9fa-4ce0-a3dd-fa36a03ca102",
+      "database_id": "ae748ca1-032c-4427-a1a0-fe39db77d1a9",
     },
   ],
   // Plugin blob seam backend: multi-MB values (resolved OpenAPI specs,
@@ -72,13 +71,8 @@
   // secret-encryption key) is a SECRET, set it with
   // `wrangler secret put EXECUTOR_SECRET_KEY`, never in vars.
   "vars": {
-    // Keep normal Executor routes fail-closed until a real Access app replaces these values.
-    // Signed /os/* calls use CLOUDFLARE_OS_AUTH_SECRET instead.
-    "ACCESS_TEAM_DOMAIN": "darjs.cloudflareaccess.com",
-    "ACCESS_AUD": "4b0e36b2e0b981ad929a4657fabe04e855deb8bf77636f259f26f73dc822ae88",
     "ACCESS_NAME_CLAIM": "name",
     "ACCESS_GROUPS_CLAIM": "groups",
-    "ADMIN_EMAILS": "darjsavid@gmail.com",
     // Never preserve a production dev-auth override through keep_vars.
     "ENABLE_DEV_AUTH": "false",
     "SELF_HOSTED_ORG_ID": "default",

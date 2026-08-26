@@ -115,3 +115,6 @@ scratch/
 # Throwaway UX prototype (not part of the app)
 ux-demo/
 
+
+# Local account pin for Wrangler deploys.
+.envrc

@@ -2,3 +2,5 @@ dist/
 .dev.vars
 .wrangler/
 wrangler.preview.jsonc
+wrangler.instance.jsonc
+deploy-secrets.json
