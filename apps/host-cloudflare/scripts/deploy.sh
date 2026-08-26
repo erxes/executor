@@ -38,7 +38,7 @@ info "account: erxes Inc ($EXPECTED_ACCOUNT_ID)"
 
 step "Provisioning D1 database '$DATABASE_NAME'"
 DB_ID="$(bunx wrangler d1 list --json 2>/dev/null \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const r=JSON.parse(s).find(d=>d.name===process.argv[1]);process.stdout.write(r?r.uuid:"")}catch{}})' "$DATABASE_NAME")"
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const r=JSON.parse(s.slice(s.indexOf("["))).find(d=>d.name===process.argv[1]);process.stdout.write(r?r.uuid:"")}catch{}})' "$DATABASE_NAME")"
 if [ -z "$DB_ID" ]; then
   CREATE_OUT="$(bunx wrangler d1 create "$DATABASE_NAME" 2>&1)"
   DB_ID="$(printf '%s' "$CREATE_OUT" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)"
