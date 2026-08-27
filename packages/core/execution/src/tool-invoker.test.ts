@@ -249,6 +249,34 @@ const crmPlugin = makeTestPlugin({
   ],
 });
 
+const crmAltPlugin = makeTestPlugin({
+  pluginId: "crm-alt-test",
+  integration: "crm_alt",
+  tools: [
+    {
+      name: "createContact",
+      description: "Create a contact in the other CRM",
+      inputJsonSchema: ContactInputJson,
+      validator: ContactValidator,
+      handler: () => Effect.succeed({ id: "contact_alt" }),
+    },
+  ],
+});
+
+const dottedNamePlugin = makeTestPlugin({
+  pluginId: "dotted-name-test",
+  integration: "catalog",
+  tools: [
+    {
+      name: "query.records",
+      description: "List records",
+      inputJsonSchema: EmptyInputJson,
+      validator: EmptyValidator,
+      handler: () => Effect.succeed({ totalCount: 1 }),
+    },
+  ],
+});
+
 const errorPlugin = makeTestPlugin({
   pluginId: "error-test",
   integration: "records",
@@ -1140,6 +1168,72 @@ describe("tool discovery", () => {
           message: 'Field with name "DisplayName" does not exist',
         },
       });
+    }),
+  );
+
+  it.effect("resolves a unique short tool name to the qualified path", () =>
+    Effect.gen(function* () {
+      const executor = yield* makeSearchExecutor();
+      const invoker = makeExecutorToolInvoker(executor, {
+        invokeOptions: { onElicitation: acceptAll },
+      });
+
+      const result = yield* invoker.invoke({
+        path: "createContact",
+        args: { email: "a@b.com" },
+      });
+      expect(result).toEqual({ ok: true, data: { id: "contact_1" } });
+
+      const described = yield* describeTool(executor, "createContact");
+      expect(described.path).toBe("crm.org.main.createContact");
+      expect(described.error).toBeUndefined();
+    }),
+  );
+
+  it.effect("resolves a unique dotted short name", () =>
+    Effect.gen(function* () {
+      const executor = yield* makeExecutorWith([dottedNamePlugin] as const);
+      yield* provision(executor as never, [
+        { pluginId: "dotted-name-test", integration: "catalog" },
+      ]);
+      const invoker = makeExecutorToolInvoker(executor, {
+        invokeOptions: { onElicitation: acceptAll },
+      });
+
+      const result = yield* invoker.invoke({ path: "query.records", args: {} });
+      expect(result).toEqual({ ok: true, data: { totalCount: 1 } });
+    }),
+  );
+
+  it.effect("does not guess when a short name matches more than one tool", () =>
+    Effect.gen(function* () {
+      const executor = yield* makeExecutorWith([crmPlugin, crmAltPlugin] as const);
+      yield* provision(executor as never, [
+        { pluginId: "crm-test", integration: "crm" },
+        { pluginId: "crm-alt-test", integration: "crm_alt" },
+      ]);
+      const invoker = makeExecutorToolInvoker(executor, {
+        invokeOptions: { onElicitation: acceptAll },
+      });
+
+      const result = yield* invoker.invoke({
+        path: "createContact",
+        args: { email: "a@b.com" },
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          code: "tool_not_found",
+          details: {
+            path: "createContact",
+          },
+        },
+      });
+      const suggestions = (result as { error: { details: { suggestions: string[] } } }).error
+        .details.suggestions;
+      expect(suggestions).toEqual(
+        expect.arrayContaining(["crm.org.main.createContact", "crm_alt.org.main.createContact"]),
+      );
     }),
   );
 

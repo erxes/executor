@@ -35,18 +35,25 @@ const formatTimeout = (timeoutMs: number): string =>
 const invocationTimeoutMessage = (timeoutMs: number): string =>
   `GraphQL upstream did not complete within ${formatTimeout(timeoutMs)}. The request was aborted. Retry the operation or verify that the endpoint is responsive.`;
 
+const unwrapOuterSelectionBraces = (select: string): string => {
+  const trimmed = select.trim();
+  return trimmed.startsWith("{") && trimmed.endsWith("}") ? trimmed.slice(1, -1).trim() : trimmed;
+};
+
 /** The operation string to send for a call. A caller-supplied `select` overrides
  *  the default scalar-leaf selection: it is spliced into the field's selection
  *  set (`field { <select> }`) so nested/list data can be requested per call. Falls
  *  back to the stored default operation when `select` is absent or the binding
  *  predates the prefix/suffix split. `select` is a control input, never a GraphQL
  *  variable. Shared with plugin.invokeTool so the validated string matches the
- *  sent string exactly. */
+ *  sent string exactly. Outer `{ ... }` around `select` is stripped so a pasted
+ *  selection set does not become `{ { fields } }`. */
 export const effectiveOperationString = (
   operation: OperationBinding,
   args: Record<string, unknown>,
 ): string => {
-  const customSelect = typeof args.select === "string" ? args.select.trim() : "";
+  const customSelect =
+    typeof args.select === "string" ? unwrapOuterSelectionBraces(args.select) : "";
   return customSelect.length > 0 &&
     operation.operationPrefix != null &&
     operation.operationSuffix != null

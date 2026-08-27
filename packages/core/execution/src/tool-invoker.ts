@@ -304,17 +304,74 @@ const extractNamespace = (path: string): string => {
  * because it would require an `integrations.list()` lookup on every invocation.
  * Callers that already know the integration kind can annotate at their own span.
  */
+type ResolvedSandboxPath =
+  | { readonly kind: "ok"; readonly path: string }
+  | { readonly kind: "ambiguous"; readonly suggestions: readonly string[] };
+
+const matchesRequestedTool = (
+  tool: { readonly path: string; readonly name: string },
+  requested: string,
+): boolean =>
+  tool.name === requested || tool.path === requested || tool.path.endsWith(`.${requested}`);
+
+/** Fully-qualified sandbox paths parse as `tools.<integration>.<owner>.<connection>.<tool>`.
+ *  Short names (`query.records`, `createContact`) do not, and 404 unless rewritten. */
+const resolveSandboxToolPath = Effect.fn("executor.tools.resolvePath")(function* (
+  executor: Executor,
+  path: string,
+) {
+  if (parseToolAddress(String(pathToAddress(path)))) {
+    return { kind: "ok", path } satisfies ResolvedSandboxPath;
+  }
+
+  const all = yield* executor.tools.list({ includeAnnotations: false }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ExecutionToolError({
+          message: "Failed to list tools for path resolution",
+          cause,
+        }),
+    ),
+  );
+  const matches = all
+    .map((tool) => ({ path: addressToPath(String(tool.address)), name: String(tool.name) }))
+    .filter((tool) => matchesRequestedTool(tool, path));
+
+  if (matches.length === 1) {
+    return { kind: "ok", path: matches[0]!.path } satisfies ResolvedSandboxPath;
+  }
+  if (matches.length > 1) {
+    return {
+      kind: "ambiguous",
+      suggestions: matches.map((tool) => tool.path),
+    } satisfies ResolvedSandboxPath;
+  }
+  return { kind: "ok", path } satisfies ResolvedSandboxPath;
+});
+
 export const makeExecutorToolInvoker = (
   executor: Executor,
   options: { readonly invokeOptions: InvokeOptions },
 ): SandboxToolInvoker => ({
   invoke: Effect.fn("mcp.tool.dispatch")(function* ({ path, args }) {
+    const resolved = yield* resolveSandboxToolPath(executor, path);
+    if (resolved.kind === "ambiguous") {
+      const result = ToolResult.fail({
+        code: "tool_not_found",
+        message: `Tool not found: ${path}`,
+        details: { path, suggestions: resolved.suggestions },
+      });
+      yield* annotateToolResultOutcome(result);
+      return result;
+    }
+    const dispatchPath = resolved.path;
+
     yield* Effect.annotateCurrentSpan({
-      "mcp.tool.name": path,
-      "mcp.tool.integration": extractNamespace(path),
+      "mcp.tool.name": dispatchPath,
+      "mcp.tool.integration": extractNamespace(dispatchPath),
     });
 
-    const address = pathToAddress(path);
+    const address = pathToAddress(dispatchPath);
     const result = yield* executor.execute(address, args, options.invokeOptions).pipe(
       Effect.catchTag("CredentialResolutionError", (err) =>
         Effect.succeed(
@@ -350,7 +407,7 @@ export const makeExecutorToolInvoker = (
         return Effect.logError("tool dispatch failed", cause).pipe(
           Effect.annotateLogs({
             "executor.correlation_id": correlationId,
-            "mcp.tool.name": path,
+            "mcp.tool.name": dispatchPath,
           }),
           Effect.flatMap(() =>
             Effect.fail(
@@ -829,6 +886,20 @@ export const describeTool = Effect.fn("executor.tools.describe")(function* (
 
   const builtin = BUILTIN_TOOL_DESCRIPTIONS.get(path);
   if (builtin) return builtin;
+
+  const resolved = yield* resolveSandboxToolPath(executor, path);
+  if (resolved.kind === "ambiguous") {
+    return {
+      path,
+      name: path,
+      error: {
+        code: "tool_not_found",
+        message: `Tool not found: ${path}`,
+        suggestions: resolved.suggestions,
+      },
+    } satisfies DescribedTool;
+  }
+  path = resolved.path;
 
   const address = pathToAddress(path);
 

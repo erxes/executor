@@ -361,18 +361,55 @@ const hasRequiredArgWithoutDefault = (field: IntrospectionField): boolean =>
     (arg: IntrospectionInputValue) => arg.type.kind === "NON_NULL" && arg.defaultValue == null,
   );
 
-// Build the DEFAULT selection set for a field's return type: every scalar/enum
-// leaf the generator can select without arguments. It deliberately does NOT
-// recurse into composite fields or guess at nested selections, for two reasons:
-//   - A real schema (GitLab has 4000+ types) makes any recursive auto-expansion
-//     either arbitrary (which N fields? how deep?) or so large the server
-//     rejects it for exceeding its query-complexity budget.
-//   - A bounded-but-arbitrary selection silently freezes a partial view at sync
-//     time. Instead, callers that want nested or list data pass an explicit
-//     `select` (see buildOperationStringForField / invoke), so the choice of
-//     deeper fields is the caller's, not a guess baked into the tool.
-// The result is always valid: selecting only leaves never needs a sub-selection,
-// and a composite type with no selectable leaves falls back to `__typename`.
+const unwrapNonNull = (ref: IntrospectionTypeRef): IntrospectionTypeRef =>
+  ref.kind === "NON_NULL" && ref.ofType ? unwrapNonNull(ref.ofType) : ref;
+
+const isListOfComposite = (
+  ref: IntrospectionTypeRef,
+  types: ReadonlyMap<string, IntrospectionType>,
+): boolean => {
+  const inner = unwrapNonNull(ref);
+  return inner.kind === "LIST" && inner.ofType != null && isCompositeType(inner.ofType, types);
+};
+
+const LIST_ITEM_LEAF_CAP = 12;
+const PREFERRED_LIST_ITEM_LEAVES = ["_id", "id", "name"] as const;
+
+const scalarLeafNames = (
+  objectType: IntrospectionType,
+  types: ReadonlyMap<string, IntrospectionType>,
+): readonly string[] => {
+  if (!objectType.fields) return [];
+  return objectType.fields
+    .filter(
+      (f: IntrospectionField) =>
+        !f.name.startsWith("__") &&
+        !hasRequiredArgWithoutDefault(f) &&
+        !isCompositeType(f.type, types),
+    )
+    .map((f: IntrospectionField) => f.name);
+};
+
+const pickListItemLeaves = (names: readonly string[]): readonly string[] => {
+  const set = new Set(names);
+  const preferred = PREFERRED_LIST_ITEM_LEAVES.filter((name) => set.has(name));
+  const rest = names.filter((name) => !preferred.includes(name));
+  return [...preferred, ...rest].slice(0, LIST_ITEM_LEAF_CAP);
+};
+
+const defaultListItemSelection = (
+  ref: IntrospectionTypeRef,
+  types: ReadonlyMap<string, IntrospectionType>,
+): string => {
+  const itemType = types.get(unwrapTypeName(unwrapNonNull(ref).ofType ?? ref));
+  const leaves = itemType ? pickListItemLeaves(scalarLeafNames(itemType, types)) : [];
+  return leaves.length > 0 ? leaves.join(" ") : "__typename";
+};
+
+// Default selection: scalar/enum leaves, plus one level of item scalars for
+// any field that is a list of objects (`list`, `items`, root `[Item!]`, etc.).
+// Nested object fields stay omitted so GitLab-style connections are not
+// walked. Callers pass `select` for those.
 const buildDefaultSelectionSet = (
   ref: IntrospectionTypeRef,
   types: ReadonlyMap<string, IntrospectionType>,
@@ -381,18 +418,19 @@ const buildDefaultSelectionSet = (
   if (!objectType?.fields) return ""; // scalar / enum / unknown: no selection
   if (objectType.kind === "SCALAR" || objectType.kind === "ENUM") return "";
 
-  const leaves = objectType.fields
-    .filter(
-      (f: IntrospectionField) =>
-        !f.name.startsWith("__") &&
-        !hasRequiredArgWithoutDefault(f) &&
-        !isCompositeType(f.type, types),
-    )
-    .map((f: IntrospectionField) => f.name);
+  const selections: string[] = [];
+  for (const field of objectType.fields) {
+    if (field.name.startsWith("__") || hasRequiredArgWithoutDefault(field)) continue;
+    if (!isCompositeType(field.type, types)) {
+      selections.push(field.name);
+      continue;
+    }
+    if (isListOfComposite(field.type, types)) {
+      selections.push(`${field.name} { ${defaultListItemSelection(field.type, types)} }`);
+    }
+  }
 
-  // A composite type MUST have a non-empty selection; `__typename` is a leaf
-  // that exists on every composite, so it is a safe minimal fallback.
-  return leaves.length > 0 ? `{ ${leaves.join(" ")} }` : "{ __typename }";
+  return selections.length > 0 ? `{ ${selections.join(" ")} }` : "{ __typename }";
 };
 
 // Name every generated operation: some servers reject anonymous operations, and
@@ -462,7 +500,7 @@ const withSelectInput = (inputSchema: unknown, returnTypeName: string): unknown 
   if (!("select" in properties)) {
     properties.select = {
       type: "string",
-      description: `Optional GraphQL selection set for the \`${returnTypeName}\` return type. Overrides the default, which selects only scalar fields. Provide the fields to return, with sub-selections for nested objects and arguments where required, e.g. "id name items { id title }". Omit for the default.`,
+      description: `Optional GraphQL selection set for the \`${returnTypeName}\` return type. Overrides the default (scalar leaves, plus one level of item scalars on list-of-object fields). Provide fields with sub-selections for nested objects, e.g. "list { _id name } totalCount". Outer braces are optional. Omit for the default.`,
     };
   }
   return { ...base, type: "object", properties };
