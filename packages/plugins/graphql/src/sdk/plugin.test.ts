@@ -30,6 +30,7 @@ import type { IntrospectionResult } from "./introspect";
 import {
   makeGitlab1146Schema,
   makeGreetingGraphqlSchema,
+  makeListResponseGraphqlSchema,
   serveGraphqlFailureTestServer,
   serveGraphqlTestServer,
   waitForRecordedRequests,
@@ -1387,6 +1388,93 @@ describe("graphqlPlugin generates valid operations against rich schemas (#1146)"
       });
       // Parse-check happens before the request is built, so nothing reached the server.
       expect((yield* server.requests).length).toBe(0);
+    }),
+  );
+});
+
+describe("graphqlPlugin default selection for list/totalCount wrappers", () => {
+  const listServer = serveGraphqlTestServer({ schema: makeListResponseGraphqlSchema() });
+
+  const lastQuery = (requests: { readonly payload: { readonly query?: string } }[]): string =>
+    requests[requests.length - 1]?.payload.query ?? "";
+
+  it.effect("selects list item scalars and totalCount, not nested composites", () =>
+    Effect.gen(function* () {
+      const server = yield* listServer;
+      const executor = yield* makeExecutor();
+      yield* executor.graphql.addIntegration({
+        endpoint: server.endpoint,
+        slug: "list_default",
+      });
+      yield* createOrgConnection(executor, {
+        integration: "list_default",
+        name: "main",
+        template: "none",
+        value: "unused",
+      });
+      yield* server.clearRequests;
+
+      const result = yield* executor.execute(toolAddr("list_default", "main", "query.records"), {});
+      expect(result).toMatchObject({ ok: true });
+      const recorded = lastQuery(yield* server.requests);
+      expect(recorded).toContain("totalCount");
+      expect(recorded).toContain("list {");
+      expect(recorded).toContain("_id");
+      expect(recorded).toContain("name");
+      expect(recorded).toContain("label");
+      expect(recorded).not.toContain("nested");
+    }),
+  );
+
+  it.effect("selects item scalars when the field itself returns a list", () =>
+    Effect.gen(function* () {
+      const server = yield* listServer;
+      const executor = yield* makeExecutor();
+      yield* executor.graphql.addIntegration({
+        endpoint: server.endpoint,
+        slug: "list_root",
+      });
+      yield* createOrgConnection(executor, {
+        integration: "list_root",
+        name: "main",
+        template: "none",
+        value: "unused",
+      });
+      yield* server.clearRequests;
+
+      const result = yield* executor.execute(toolAddr("list_root", "main", "query.items"), {});
+      expect(result).toMatchObject({ ok: true });
+      const recorded = lastQuery(yield* server.requests);
+      expect(recorded).toContain("_id");
+      expect(recorded).toContain("name");
+      expect(recorded).toContain("label");
+      expect(recorded).not.toContain("nested");
+    }),
+  );
+
+  it.effect("strips outer braces from a caller-supplied select", () =>
+    Effect.gen(function* () {
+      const server = yield* listServer;
+      const executor = yield* makeExecutor();
+      yield* executor.graphql.addIntegration({
+        endpoint: server.endpoint,
+        slug: "list_braces",
+      });
+      yield* createOrgConnection(executor, {
+        integration: "list_braces",
+        name: "main",
+        template: "none",
+        value: "unused",
+      });
+      yield* server.clearRequests;
+
+      const result = yield* executor.execute(toolAddr("list_braces", "main", "query.records"), {
+        select: "{ list { _id name } totalCount }",
+      });
+      expect(result).toMatchObject({ ok: true });
+      const recorded = lastQuery(yield* server.requests);
+      expect(recorded).toContain("list {");
+      expect(recorded).not.toContain("{ {");
     }),
   );
 });

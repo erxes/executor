@@ -79,7 +79,7 @@ const GRAPHQL_SKILL_BODY = [
   "",
   "## Why `select` matters",
   "",
-  "Generated GraphQL tools select only scalar fields on the return type by default. They deliberately omit nested objects and lists, since expanding them automatically can create huge or invalid queries. A list query may therefore return `totalCount` but omit `list` even when rows exist.",
+  "Generated GraphQL tools select scalar fields on the return type by default, plus one level of item scalars on list-of-object fields. Nested objects and connection fields still need an explicit `select`.",
   "",
   "`outputTypeScript` describes fields that are available to request. It does not mean every field is returned when `select` is omitted.",
   "",

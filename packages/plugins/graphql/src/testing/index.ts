@@ -283,6 +283,34 @@ export const makeGreetingGraphqlSchema = (
 //      generator emits them with no sub-selection.
 // graphql-yoga validates with graphql-js, exactly like the @emulators/gitlab
 // surface, so a generated operation that validates clean here is valid GraphQL.
+/** List-of-objects at the root and behind a `{ list, totalCount }` wrapper. */
+export const makeListResponseGraphqlSchema = (): GraphQLSchema =>
+  createSchema<GraphqlTestContext>({
+    typeDefs: /* GraphQL */ `
+      type Query {
+        records(limit: Int): ItemListResponse
+        items: [Item!]
+      }
+
+      type ItemListResponse {
+        list: [Item!]
+        totalCount: Int
+        nested: Nested
+      }
+
+      type Item {
+        _id: String
+        name: String
+        label: String
+        nested: Nested
+      }
+
+      type Nested {
+        name: String
+      }
+    `,
+  });
+
 export const makeGitlab1146Schema = (): GraphQLSchema =>
   createSchema<GraphqlTestContext>({
     typeDefs: /* GraphQL */ `
