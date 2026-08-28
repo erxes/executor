@@ -1,6 +1,10 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 import { Schema } from "effect";
-import { InternalError, IntegrationAlreadyExistsError } from "@executor-js/sdk/shared";
+import {
+  InternalError,
+  IntegrationAlreadyExistsError,
+  IntegrationNotFoundError,
+} from "@executor-js/sdk/shared";
 
 import { GraphqlIntrospectionError, GraphqlExtractionError } from "../sdk/errors";
 import { GraphqlAuthMethod, GraphqlAuthMethodInput } from "../sdk/types";
@@ -64,6 +68,16 @@ const ConfigureResponse = Schema.Struct({
   authenticationTemplate: Schema.Array(GraphqlAuthMethod),
 });
 
+const AttachIntrospectionPayload = Schema.Struct({
+  introspectionJson: Schema.String,
+});
+
+const AttachIntrospectionResponse = Schema.Struct({
+  slug: Schema.String,
+  name: Schema.String,
+  toolCount: Schema.Number,
+});
+
 // ---------------------------------------------------------------------------
 // Errors with HTTP status
 // ---------------------------------------------------------------------------
@@ -87,6 +101,7 @@ const GraphqlErrors = [
   IntrospectionError,
   ExtractionError,
   IntegrationAlreadyExistsError,
+  IntegrationNotFoundError,
 ] as const;
 
 export const GraphqlGroup = HttpApiGroup.make("graphql")
@@ -116,6 +131,14 @@ export const GraphqlGroup = HttpApiGroup.make("graphql")
       params: IntegrationParams,
       payload: ConfigurePayload,
       success: ConfigureResponse,
+      error: GraphqlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("attachIntrospection", "/graphql/integrations/:slug/introspection", {
+      params: IntegrationParams,
+      payload: AttachIntrospectionPayload,
+      success: AttachIntrospectionResponse,
       error: GraphqlErrors,
     }),
   );

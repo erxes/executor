@@ -8,6 +8,7 @@ import {
   AuthTemplateSlug,
   definePlugin,
   IntegrationAlreadyExistsError,
+  IntegrationNotFoundError,
   IntegrationDetectionResult,
   IntegrationSlug,
   mergeAuthTemplates,
@@ -1067,6 +1068,70 @@ const makeGraphqlExtension = (ctx: PluginCtx<GraphqlStore>) => {
       };
     });
 
+  const persistIntrospectionSnapshot = (
+    slug: IntegrationSlug,
+    baseConfig: GraphqlIntegrationConfig,
+    introspectionJson: string,
+    description: string | undefined,
+  ) =>
+    Effect.gen(function* () {
+      const introspection = yield* parseIntrospectionJson(introspectionJson);
+      const { result } = yield* extract(introspection);
+      const prepared = prepareOperations(result.fields, introspection);
+      const snapshotJson = JSON.stringify({ data: introspection });
+      const introspectionHash = yield* sha256Hex(snapshotJson);
+      const config = GraphqlIntegrationConfig.make({
+        ...baseConfig,
+        introspectionHash,
+      });
+
+      yield* ctx.storage.putIntrospection(introspectionHash, snapshotJson);
+
+      yield* ctx.transaction(
+        Effect.gen(function* () {
+          yield* ctx.storage.replaceOperations(String(slug), toStoredOperations(slug, prepared));
+          const schemaDescription =
+            typeof (introspection as { description?: unknown }).description === "string"
+              ? ((introspection as { description?: string }).description ?? "").trim()
+              : "";
+          yield* ctx.core.integrations.update(slug, {
+            description: description?.trim() || schemaDescription || config.name,
+            config,
+          });
+        }),
+      );
+
+      return {
+        slug: String(slug),
+        name: config.name,
+        toolCount: prepared.length,
+      };
+    });
+
+  /** Attach a pre-built introspection snapshot to an existing integration that
+   *  was registered without one. No-op when the integration already stores a
+   *  snapshot hash. */
+  const attachIntrospectionSnapshot = (slugInput: string, introspectionJson: string) =>
+    Effect.gen(function* () {
+      const slug = IntegrationSlug.make(slugInput);
+      const record = yield* ctx.core.integrations.get(slug);
+      if (!record) {
+        return yield* new IntegrationNotFoundError({ slug });
+      }
+      const current = Option.getOrNull(decodeGraphqlIntegrationConfigOption(record.config));
+      if (current?.introspectionHash != null) {
+        return { slug: String(slug), name: current.name, toolCount: 0 };
+      }
+      const baseConfig =
+        current ??
+        GraphqlIntegrationConfig.make({
+          endpoint: "",
+          name: record.description,
+          authenticationTemplate: [],
+        });
+      return yield* persistIntrospectionSnapshot(slug, baseConfig, introspectionJson, undefined);
+    });
+
   const configureIntegration = (slug: string, input: GraphqlConfigureInput) =>
     Effect.gen(function* () {
       const record = yield* ctx.core.integrations.get(IntegrationSlug.make(slug));
@@ -1171,6 +1236,9 @@ const makeGraphqlExtension = (ctx: PluginCtx<GraphqlStore>) => {
   return {
     /** Register a GraphQL integration (introspects + persists operations). */
     addIntegration: (input: GraphqlAddIntegrationInput) => addIntegrationInternal(input),
+
+    /** Attach a pre-built introspection snapshot to an existing integration. */
+    attachIntrospectionSnapshot,
 
     /** Read the integration's stored config. */
     getIntegration: (slug: string) =>

@@ -2506,6 +2506,20 @@ export const createExecutor = <const TPlugins extends readonly AnyPlugin[] = rea
     const syncHealthReason = (result: ResolveToolsResult): string =>
       result.incompleteReason ?? "plugin returned an incomplete tool catalog";
 
+    const connectionCatalogIsFresh = (
+      connection: ConnectionRow,
+      integrationRow: IntegrationRow,
+    ): boolean => {
+      if (connection.tools_synced_at == null) return false;
+      const syncedAt = Number(connection.tools_synced_at);
+      const revisedAt =
+        integrationRow.config_revised_at == null ? null : Number(integrationRow.config_revised_at);
+      if (revisedAt !== null && syncedAt < revisedAt) return false;
+      const health = Option.getOrNull(decodeLastHealth(connection.last_health));
+      if (health?.detail?.startsWith(toolSyncHealthDetailPrefix) === true) return false;
+      return true;
+    };
+
     const produceConnectionTools = (
       integrationRow: IntegrationRow,
       ref: ConnectionRef,
@@ -2814,13 +2828,14 @@ export const createExecutor = <const TPlugins extends readonly AnyPlugin[] = rea
           catch: (cause) => storageFailureFromUnknown("invalid owner", cause),
         });
         const now = new Date();
+        const existingBeforeUpsert = yield* findConnectionRow({
+          owner: input.owner,
+          integration: input.integration,
+          name,
+        });
         yield* transaction(
           Effect.gen(function* () {
-            const existing = yield* findConnectionRow({
-              owner: input.owner,
-              integration: input.integration,
-              name,
-            });
+            const existing = existingBeforeUpsert;
             const set: Record<string, unknown> = {
               template: String(input.template),
               provider: providerKey,
@@ -2880,10 +2895,26 @@ export const createExecutor = <const TPlugins extends readonly AnyPlugin[] = rea
           integration: input.integration,
           name,
         };
-        // Produce + persist tools for the new connection.
-        yield* produceConnectionTools(integrationRow, ref).pipe(
-          Effect.catchTag("IntegrationNotFoundError", () => Effect.succeed([] as readonly Tool[])),
-        );
+        const skipToolProduction =
+          existingBeforeUpsert != null &&
+          connectionCatalogIsFresh(existingBeforeUpsert, integrationRow) &&
+          (yield* core.findMany("tool", {
+            where: (b: AnyCb) =>
+              b.and(
+                byOwner(input.owner)(b),
+                b("integration", "=", String(input.integration)),
+                b("connection", "=", String(name)),
+              ),
+            limit: 1,
+          })).length > 0;
+        if (!skipToolProduction) {
+          // Produce + persist tools for the new connection.
+          yield* produceConnectionTools(integrationRow, ref).pipe(
+            Effect.catchTag("IntegrationNotFoundError", () =>
+              Effect.succeed([] as readonly Tool[]),
+            ),
+          );
+        }
 
         const row = yield* findConnectionRow(ref);
         return row

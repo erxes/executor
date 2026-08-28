@@ -2,9 +2,11 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "executor-cloudflare",
   "compatibility_date": "2025-04-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // Hosted integrations must use public routing. Private-origin fetches from an
+  // Executor custom domain can bypass TLS when the target is in the same zone.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "main": "src/worker.ts",
-  "routes": [{ "pattern": "executor-erxes-os.darjs.dev", "custom_domain": true }],
+  // routes are injected by scripts/deploy.sh per installation
   // Access configuration is set per installation after the first deploy.
   // Preserve those live bindings when this source config does not declare them.
   "keep_vars": true,

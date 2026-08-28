@@ -62,9 +62,70 @@ const executorRequest = (
   });
 };
 
+const ERXES_INTROSPECTION_ASSET = "/erxes-introspection.json";
+
+const loadErxesIntrospection = async (
+  env: CloudflareEnv,
+  request: Request,
+): Promise<string | null> => {
+  const asset = await env.ASSETS.fetch(
+    new Request(new URL(ERXES_INTROSPECTION_ASSET, request.url)),
+  );
+  if (!asset.ok) return null;
+  return asset.text();
+};
+
+const ensureErxesIntrospection = async (
+  request: Request,
+  app: (request: Request) => Promise<Response>,
+  endpoint: string,
+  introspectionJson: string,
+): Promise<Response | null> => {
+  const existing = await app(
+    executorRequest(request, `/api/graphql/integrations/${ERXES_INTEGRATION}`, "GET"),
+  );
+  if (!existing.ok) return existing;
+
+  const integration = await existing.json();
+  if (integration === null) {
+    const created = await app(
+      executorRequest(request, "/api/graphql/integrations", "POST", {
+        endpoint,
+        slug: ERXES_INTEGRATION,
+        name: "OfficeNext",
+        description: "OfficeNext Erxes GraphQL API",
+        introspectionJson,
+        authenticationTemplate: [
+          {
+            slug: "cookie",
+            type: "apiKey",
+            headers: { Cookie: [{ type: "variable", name: "token" }] },
+          },
+        ],
+      }),
+    );
+    if (!created.ok && created.status !== 409) return created;
+    return null;
+  }
+
+  const attached = await app(
+    executorRequest(
+      request,
+      `/api/graphql/integrations/${ERXES_INTEGRATION}/introspection`,
+      "POST",
+      {
+        introspectionJson,
+      },
+    ),
+  );
+  if (!attached.ok) return attached;
+  return null;
+};
+
 const provisionErxes = async (
   request: Request,
   app: (request: Request) => Promise<Response>,
+  env: CloudflareEnv,
 ): Promise<Response> => {
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 
@@ -85,27 +146,38 @@ const provisionErxes = async (
     return new Response("Invalid request", { status: 400 });
   }
 
-  const existing = await app(
-    executorRequest(request, `/api/graphql/integrations/${ERXES_INTEGRATION}`, "GET"),
-  );
-  if (!existing.ok) return existing;
-  if ((await existing.json()) === null) {
-    const created = await app(
-      executorRequest(request, "/api/graphql/integrations", "POST", {
-        endpoint: input.endpoint,
-        slug: ERXES_INTEGRATION,
-        name: "OfficeNext",
-        description: "OfficeNext Erxes GraphQL API",
-        authenticationTemplate: [
-          {
-            slug: "cookie",
-            type: "apiKey",
-            headers: { Cookie: [{ type: "variable", name: "token" }] },
-          },
-        ],
-      }),
+  const introspectionJson = await loadErxesIntrospection(env, request);
+  if (introspectionJson != null) {
+    const integrationError = await ensureErxesIntrospection(
+      request,
+      app,
+      input.endpoint,
+      introspectionJson,
     );
-    if (!created.ok && created.status !== 409) return created;
+    if (integrationError != null) return integrationError;
+  } else {
+    const existing = await app(
+      executorRequest(request, `/api/graphql/integrations/${ERXES_INTEGRATION}`, "GET"),
+    );
+    if (!existing.ok) return existing;
+    if ((await existing.json()) === null) {
+      const created = await app(
+        executorRequest(request, "/api/graphql/integrations", "POST", {
+          endpoint: input.endpoint,
+          slug: ERXES_INTEGRATION,
+          name: "OfficeNext",
+          description: "OfficeNext Erxes GraphQL API",
+          authenticationTemplate: [
+            {
+              slug: "cookie",
+              type: "apiKey",
+              headers: { Cookie: [{ type: "variable", name: "token" }] },
+            },
+          ],
+        }),
+      );
+      if (!created.ok && created.status !== 409) return created;
+    }
   }
 
   return app(
@@ -135,7 +207,7 @@ export default {
       return serve.mcp(new Request(url, request), env, ctx);
     }
     if (url.pathname === "/os/provision") {
-      return provisionErxes(request, serve.app);
+      return provisionErxes(request, serve.app, env);
     }
     if (url.pathname === "/mcp") {
       return serve.mcp(request, env, ctx);

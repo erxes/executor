@@ -86,5 +86,13 @@ export const GraphqlHandlers = HttpApiBuilder.group(ExecutorApiWithGraphql, "gra
           return { authenticationTemplate: [...authenticationTemplate] };
         }),
       ),
+    )
+    .handle("attachIntrospection", ({ params: path, payload }) =>
+      capture(
+        Effect.gen(function* () {
+          const ext = yield* GraphqlExtensionService;
+          return yield* ext.attachIntrospectionSnapshot(path.slug, payload.introspectionJson);
+        }),
+      ),
     ),
 );
