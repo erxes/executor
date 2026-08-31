@@ -1,5 +1,17 @@
 # @executor-js/plugin-mcp
 
+## 1.6.1
+
+### Patch Changes
+
+- [#1747](https://github.com/UsefulSoftwareCo/executor/pull/1747) [`91062c2`](https://github.com/UsefulSoftwareCo/executor/commit/91062c2b1d7b8edbc8470ca5eaa544045652afaa) Thanks [@RhysSullivan](https://github.com/RhysSullivan)! - Load the MCP client SDK lazily on first outbound connection instead of at module evaluation. Runtimes that bundle the plugin (notably Cloudflare Workers) no longer pay the client package's module-eval memory and CPU on startup or on code paths that never dial an MCP server.
+
+- Updated dependencies []:
+  - @executor-js/api@1.4.64
+  - @executor-js/react@1.4.64
+  - @executor-js/sdk@1.6.1
+  - @executor-js/config@1.6.1
+
 ## 1.6.0
 
 ### Minor Changes

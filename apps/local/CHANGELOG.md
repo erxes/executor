@@ -1,5 +1,32 @@
 # @executor-js/local
 
+## 1.6.1
+
+### Patch Changes
+
+- Updated dependencies [[`851daa7`](https://github.com/UsefulSoftwareCo/executor/commit/851daa7d4fa881700fbcdc954a204230cfb2ab2f), [`ddbf0fe`](https://github.com/UsefulSoftwareCo/executor/commit/ddbf0feba38c8502d78fa20c3081391b8ba3d112), [`91062c2`](https://github.com/UsefulSoftwareCo/executor/commit/91062c2b1d7b8edbc8470ca5eaa544045652afaa), [`62748e8`](https://github.com/UsefulSoftwareCo/executor/commit/62748e86122b747226c76c2e112c5c4d2b4f7095), [`0007474`](https://github.com/UsefulSoftwareCo/executor/commit/0007474602d8da3642648f216bfdb0f09eb0914f), [`d4afe0c`](https://github.com/UsefulSoftwareCo/executor/commit/d4afe0c79f146dd169a00988a2d5d0469297be19)]:
+  - @executor-js/plugin-graphql@1.6.1
+  - @executor-js/execution@1.6.1
+  - @executor-js/plugin-openapi@1.6.1
+  - @executor-js/plugin-mcp@1.6.1
+  - @executor-js/analytics@0.1.8
+  - @executor-js/api@1.4.64
+  - @executor-js/host-mcp@1.4.4
+  - @executor-js/mcp-apps-shell@1.4.12
+  - @executor-js/plugin-provider-service-split@0.0.15
+  - @executor-js/plugin-onepassword@1.6.1
+  - @executor-js/plugin-toolkits@1.5.36
+  - @executor-js/react@1.4.64
+  - @executor-js/app@1.4.4
+  - @executor-js/sdk@1.6.1
+  - @executor-js/runtime-quickjs@1.6.1
+  - @executor-js/config@1.6.1
+  - @executor-js/plugin-file-secrets@1.6.1
+  - @executor-js/plugin-keychain@1.6.1
+  - @executor-js/plugin-example@1.6.1
+  - @executor-js/plugin-desktop-settings@1.6.1
+  - @executor-js/vite-plugin@0.0.61
+
 ## 1.6.0
 
 ### Patch Changes
