@@ -99,9 +99,14 @@ else
 fi
 chmod 600 "$SECRETS_FILE"
 
+step "Fetching Erxes introspection snapshot"
+node scripts/fetch-erxes-introspection.mjs
+
 step "Building the web SPA"
 bunx vite build
 node scripts/assert-shell-asset.mjs
+cp assets/erxes-introspection.json dist/erxes-introspection.json
+info "bundled erxes-introspection.json into dist/"
 
 if [ "${1:-}" = "--dry-run" ]; then
   info "dry-run: skipped Worker deploy and secret upload"

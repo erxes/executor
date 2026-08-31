@@ -40,7 +40,7 @@ const accessConfigErrorResponse = (missingVars: readonly string[]): Response =>
     },
   });
 
-const ERXES_INTEGRATION = "erxes-officenext";
+const DEFAULT_ERXES_INTEGRATION = "erxes-officenext";
 
 const executorRequest = (
   original: Request,
@@ -62,40 +62,46 @@ const executorRequest = (
   });
 };
 
-const provisionErxes = async (
+const parseIntegrationSlug = (raw: unknown): string | null => {
+  if (raw === undefined || raw === null || raw === "") return DEFAULT_ERXES_INTEGRATION;
+  if (typeof raw !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(raw)) return null;
+  return raw;
+};
+
+const ERXES_INTROSPECTION_ASSET = "/erxes-introspection.json";
+
+const loadErxesIntrospection = async (
+  env: CloudflareEnv,
+  request: Request,
+): Promise<string | null> => {
+  const asset = await env.ASSETS.fetch(
+    new Request(new URL(ERXES_INTROSPECTION_ASSET, request.url)),
+  );
+  if (!asset.ok) return null;
+  return asset.text();
+};
+
+const ensureErxesIntrospection = async (
   request: Request,
   app: (request: Request) => Promise<Response>,
-): Promise<Response> => {
-  if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
-
-  let input: { endpoint?: unknown; cookie?: unknown };
-  // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: malformed external JSON becomes a 400 response
-  try {
-    input = (await request.json()) as { endpoint?: unknown; cookie?: unknown };
-  } catch {
-    return new Response("Invalid request", { status: 400 });
-  }
-  if (
-    typeof input.endpoint !== "string" ||
-    typeof input.cookie !== "string" ||
-    !input.cookie.startsWith("auth-token=") ||
-    input.cookie.includes("\r") ||
-    input.cookie.includes("\n")
-  ) {
-    return new Response("Invalid request", { status: 400 });
-  }
-
+  integration: string,
+  endpoint: string,
+  introspectionJson: string,
+): Promise<Response | null> => {
   const existing = await app(
-    executorRequest(request, `/api/graphql/integrations/${ERXES_INTEGRATION}`, "GET"),
+    executorRequest(request, `/api/graphql/integrations/${integration}`, "GET"),
   );
   if (!existing.ok) return existing;
-  if ((await existing.json()) === null) {
+
+  const existingIntegration = await existing.json();
+  if (existingIntegration === null) {
     const created = await app(
       executorRequest(request, "/api/graphql/integrations", "POST", {
-        endpoint: input.endpoint,
-        slug: ERXES_INTEGRATION,
-        name: "OfficeNext",
-        description: "OfficeNext Erxes GraphQL API",
+        endpoint,
+        slug: integration,
+        name: integration,
+        description: `${integration} Erxes GraphQL API`,
+        introspectionJson,
         authenticationTemplate: [
           {
             slug: "cookie",
@@ -106,17 +112,92 @@ const provisionErxes = async (
       }),
     );
     if (!created.ok && created.status !== 409) return created;
+    return null;
+  }
+
+  const attached = await app(
+    executorRequest(request, `/api/graphql/integrations/${integration}/introspection`, "POST", {
+      introspectionJson,
+    }),
+  );
+  if (!attached.ok) return attached;
+  return null;
+};
+
+const provisionErxes = async (
+  request: Request,
+  app: (request: Request) => Promise<Response>,
+  env: CloudflareEnv,
+): Promise<Response> => {
+  if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
+  let input: { endpoint?: unknown; cookie?: unknown; integration?: unknown };
+  // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: malformed external JSON becomes a 400 response
+  try {
+    input = (await request.json()) as {
+      endpoint?: unknown;
+      cookie?: unknown;
+      integration?: unknown;
+    };
+  } catch {
+    return new Response("Invalid request", { status: 400 });
+  }
+  const integration = parseIntegrationSlug(input.integration);
+  if (integration === null) return new Response("Invalid request", { status: 400 });
+  if (
+    typeof input.endpoint !== "string" ||
+    typeof input.cookie !== "string" ||
+    !input.cookie.startsWith("auth-token=") ||
+    input.cookie.includes("\r") ||
+    input.cookie.includes("\n")
+  ) {
+    return new Response("Invalid request", { status: 400 });
+  }
+
+  const introspectionJson = await loadErxesIntrospection(env, request);
+  if (introspectionJson != null) {
+    const integrationError = await ensureErxesIntrospection(
+      request,
+      app,
+      integration,
+      input.endpoint,
+      introspectionJson,
+    );
+    if (integrationError != null) return integrationError;
+  } else {
+    const existing = await app(
+      executorRequest(request, `/api/graphql/integrations/${integration}`, "GET"),
+    );
+    if (!existing.ok) return existing;
+    if ((await existing.json()) === null) {
+      const created = await app(
+        executorRequest(request, "/api/graphql/integrations", "POST", {
+          endpoint: input.endpoint,
+          slug: integration,
+          name: integration,
+          description: `${integration} Erxes GraphQL API`,
+          authenticationTemplate: [
+            {
+              slug: "cookie",
+              type: "apiKey",
+              headers: { Cookie: [{ type: "variable", name: "token" }] },
+            },
+          ],
+        }),
+      );
+      if (!created.ok && created.status !== 409) return created;
+    }
   }
 
   return app(
     executorRequest(request, "/api/connections", "POST", {
       owner: "user",
-      name: ERXES_INTEGRATION,
-      integration: ERXES_INTEGRATION,
+      name: integration,
+      integration,
       template: "cookie",
       value: input.cookie,
-      identityLabel: "OfficeNext",
-      description: "Your OfficeNext account",
+      identityLabel: integration,
+      description: `Your ${integration} account`,
     }),
   );
 };
@@ -135,7 +216,7 @@ export default {
       return serve.mcp(new Request(url, request), env, ctx);
     }
     if (url.pathname === "/os/provision") {
-      return provisionErxes(request, serve.app);
+      return provisionErxes(request, serve.app, env);
     }
     if (url.pathname === "/mcp") {
       return serve.mcp(request, env, ctx);

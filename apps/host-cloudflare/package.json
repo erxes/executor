@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build && node scripts/assert-shell-asset.mjs",
+    "build": "node scripts/fetch-erxes-introspection.mjs && vite build && node scripts/assert-shell-asset.mjs && cp assets/erxes-introspection.json dist/erxes-introspection.json",
     "deploy": "vite build && node scripts/assert-shell-asset.mjs && wrangler deploy",
     "dev": "wrangler dev",
     "dev:web": "vite dev",

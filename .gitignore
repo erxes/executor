@@ -118,3 +118,4 @@ ux-demo/
 
 # Local account pin for Wrangler deploys.
 .envrc
+apps/host-cloudflare/assets/erxes-introspection.json

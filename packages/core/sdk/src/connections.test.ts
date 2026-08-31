@@ -758,6 +758,37 @@ describe("connections.checkHealth", () => {
       expect(result.status).toBe("unknown");
     }),
   );
+
+  it.effect("re-saving a connection with a fresh catalog skips tool reproduction", () =>
+    Effect.gen(function* () {
+      const executor = yield* setup();
+      yield* executor.connections.create({
+        owner: "org",
+        name: ConnectionName.make("main"),
+        integration: INTEG,
+        template: TEMPLATE,
+        value: "secret-token",
+      });
+      const toolsBefore = yield* executor.tools.list({ integration: INTEG });
+      expect(toolsBefore.length).toBeGreaterThan(0);
+
+      yield* executor.connections.create({
+        owner: "org",
+        name: ConnectionName.make("main"),
+        integration: INTEG,
+        template: TEMPLATE,
+        value: "rotated-token",
+      });
+
+      const toolsAfter = yield* executor.tools.list({ integration: INTEG });
+      expect(toolsAfter.map((tool) => String(tool.name)).sort()).toEqual(
+        toolsBefore.map((tool) => String(tool.name)).sort(),
+      );
+
+      const value = yield* executor.demo.resolveValue("org", "main");
+      expect(value).toBe("rotated-token");
+    }),
+  );
 });
 
 describe("execute over a connection", () => {

@@ -8,6 +8,7 @@ import {
   AuthTemplateSlug,
   definePlugin,
   IntegrationAlreadyExistsError,
+  IntegrationNotFoundError,
   IntegrationDetectionResult,
   IntegrationSlug,
   mergeAuthTemplates,
@@ -361,18 +362,55 @@ const hasRequiredArgWithoutDefault = (field: IntrospectionField): boolean =>
     (arg: IntrospectionInputValue) => arg.type.kind === "NON_NULL" && arg.defaultValue == null,
   );
 
-// Build the DEFAULT selection set for a field's return type: every scalar/enum
-// leaf the generator can select without arguments. It deliberately does NOT
-// recurse into composite fields or guess at nested selections, for two reasons:
-//   - A real schema (GitLab has 4000+ types) makes any recursive auto-expansion
-//     either arbitrary (which N fields? how deep?) or so large the server
-//     rejects it for exceeding its query-complexity budget.
-//   - A bounded-but-arbitrary selection silently freezes a partial view at sync
-//     time. Instead, callers that want nested or list data pass an explicit
-//     `select` (see buildOperationStringForField / invoke), so the choice of
-//     deeper fields is the caller's, not a guess baked into the tool.
-// The result is always valid: selecting only leaves never needs a sub-selection,
-// and a composite type with no selectable leaves falls back to `__typename`.
+const unwrapNonNull = (ref: IntrospectionTypeRef): IntrospectionTypeRef =>
+  ref.kind === "NON_NULL" && ref.ofType ? unwrapNonNull(ref.ofType) : ref;
+
+const isListOfComposite = (
+  ref: IntrospectionTypeRef,
+  types: ReadonlyMap<string, IntrospectionType>,
+): boolean => {
+  const inner = unwrapNonNull(ref);
+  return inner.kind === "LIST" && inner.ofType != null && isCompositeType(inner.ofType, types);
+};
+
+const LIST_ITEM_LEAF_CAP = 12;
+const PREFERRED_LIST_ITEM_LEAVES = ["_id", "id", "name"] as const;
+
+const scalarLeafNames = (
+  objectType: IntrospectionType,
+  types: ReadonlyMap<string, IntrospectionType>,
+): readonly string[] => {
+  if (!objectType.fields) return [];
+  return objectType.fields
+    .filter(
+      (f: IntrospectionField) =>
+        !f.name.startsWith("__") &&
+        !hasRequiredArgWithoutDefault(f) &&
+        !isCompositeType(f.type, types),
+    )
+    .map((f: IntrospectionField) => f.name);
+};
+
+const pickListItemLeaves = (names: readonly string[]): readonly string[] => {
+  const set = new Set(names);
+  const preferred = PREFERRED_LIST_ITEM_LEAVES.filter((name) => set.has(name));
+  const rest = names.filter((name) => !preferred.includes(name));
+  return [...preferred, ...rest].slice(0, LIST_ITEM_LEAF_CAP);
+};
+
+const defaultListItemSelection = (
+  ref: IntrospectionTypeRef,
+  types: ReadonlyMap<string, IntrospectionType>,
+): string => {
+  const itemType = types.get(unwrapTypeName(unwrapNonNull(ref).ofType ?? ref));
+  const leaves = itemType ? pickListItemLeaves(scalarLeafNames(itemType, types)) : [];
+  return leaves.length > 0 ? leaves.join(" ") : "__typename";
+};
+
+// Default selection: scalar/enum leaves, plus one level of item scalars for
+// any field that is a list of objects (`list`, `items`, root `[Item!]`, etc.).
+// Nested object fields stay omitted so GitLab-style connections are not
+// walked. Callers pass `select` for those.
 const buildDefaultSelectionSet = (
   ref: IntrospectionTypeRef,
   types: ReadonlyMap<string, IntrospectionType>,
@@ -381,19 +419,92 @@ const buildDefaultSelectionSet = (
   if (!objectType?.fields) return ""; // scalar / enum / unknown: no selection
   if (objectType.kind === "SCALAR" || objectType.kind === "ENUM") return "";
 
-  const leaves = objectType.fields
-    .filter(
-      (f: IntrospectionField) =>
-        !f.name.startsWith("__") &&
-        !hasRequiredArgWithoutDefault(f) &&
-        !isCompositeType(f.type, types),
-    )
-    .map((f: IntrospectionField) => f.name);
+  const selections: string[] = [];
+  for (const field of objectType.fields) {
+    if (field.name.startsWith("__") || hasRequiredArgWithoutDefault(field)) continue;
+    if (!isCompositeType(field.type, types)) {
+      selections.push(field.name);
+      continue;
+    }
+    if (isListOfComposite(field.type, types)) {
+      selections.push(`${field.name} { ${defaultListItemSelection(field.type, types)} }`);
+    }
+  }
 
-  // A composite type MUST have a non-empty selection; `__typename` is a leaf
-  // that exists on every composite, so it is a safe minimal fallback.
-  return leaves.length > 0 ? `{ ${leaves.join(" ")} }` : "{ __typename }";
+  return selections.length > 0 ? `{ ${selections.join(" ")} }` : "{ __typename }";
 };
+
+// A GraphQL call can return any caller-selected subset, so every property stays optional and
+// every object permits extra fields. The bounded expansion gives tools.describe enough real type
+// information to author `select` without copying an unbounded schema into every tool row.
+const MAX_OUTPUT_SHAPE_DEPTH = 3;
+
+const outputScalarToJsonSchema = (name: string): Record<string, unknown> => {
+  if (name === "Int") return { type: "integer" };
+  if (name === "Float") return { type: "number" };
+  if (name === "Boolean") return { type: "boolean" };
+  if (name === "JSON") return {};
+  return {
+    type: "string",
+    ...(name === "String" || name === "ID"
+      ? {}
+      : {
+          description: `Custom scalar: ${name}`,
+        }),
+  };
+};
+
+const outputTypeRefToJsonSchema = (
+  ref: IntrospectionTypeRef,
+  types: ReadonlyMap<string, IntrospectionType>,
+  depth = 0,
+  ancestors: ReadonlySet<string> = new Set(),
+): Record<string, unknown> => {
+  if (ref.kind === "NON_NULL" && ref.ofType) {
+    return outputTypeRefToJsonSchema(ref.ofType, types, depth, ancestors);
+  }
+  if (ref.kind === "LIST") {
+    return {
+      type: "array",
+      items: ref.ofType ? outputTypeRefToJsonSchema(ref.ofType, types, depth, ancestors) : {},
+    };
+  }
+
+  const typeName = unwrapTypeName(ref);
+  const type = types.get(typeName);
+  if (type?.kind === "ENUM") {
+    return { type: "string", enum: type.enumValues?.map((value) => value.name) ?? [] };
+  }
+  if (type?.kind === "SCALAR" || ref.kind === "SCALAR") {
+    return outputScalarToJsonSchema(typeName);
+  }
+  if (!type?.fields || depth >= MAX_OUTPUT_SHAPE_DEPTH || ancestors.has(typeName)) {
+    return { type: "object", description: `GraphQL type ${typeName}`, additionalProperties: true };
+  }
+
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(typeName);
+  const properties = Object.fromEntries(
+    type.fields
+      .filter((field) => !field.name.startsWith("__"))
+      .map((field) => [
+        field.name,
+        outputTypeRefToJsonSchema(field.type, types, depth + 1, nextAncestors),
+      ]),
+  );
+  return { type: "object", properties, additionalProperties: true };
+};
+
+const buildOutputSchema = (
+  field: IntrospectionField,
+  types: ReadonlyMap<string, IntrospectionType>,
+): Record<string, unknown> => ({
+  type: "object",
+  properties: {
+    [field.name]: outputTypeRefToJsonSchema(field.type, types),
+  },
+  additionalProperties: true,
+});
 
 // Name every generated operation: some servers reject anonymous operations, and
 // APM tooling keys traces off the operation name. Field names are already valid
@@ -443,6 +554,7 @@ interface PreparedOperation {
   readonly toolName: string;
   readonly description: string;
   readonly inputSchema: unknown;
+  readonly outputSchema?: unknown;
   readonly binding: OperationBinding;
 }
 
@@ -462,7 +574,7 @@ const withSelectInput = (inputSchema: unknown, returnTypeName: string): unknown 
   if (!("select" in properties)) {
     properties.select = {
       type: "string",
-      description: `Optional GraphQL selection set for the \`${returnTypeName}\` return type. Overrides the default, which selects only scalar fields. Provide the fields to return, with sub-selections for nested objects and arguments where required, e.g. "id name items { id title }". Omit for the default.`,
+      description: `Optional GraphQL selection set for the \`${returnTypeName}\` return type. Overrides the default (scalar leaves, plus one level of item scalars on list-of-object fields). Provide fields with sub-selections for nested objects, e.g. "list { _id name } totalCount". Outer braces are optional. Omit for the default.`,
     };
   }
   return { ...base, type: "object", properties };
@@ -529,6 +641,7 @@ const prepareOperations = (
         Option.getOrUndefined(extracted.inputSchema),
         extracted.returnTypeName,
       ),
+      ...(entry ? { outputSchema: buildOutputSchema(entry.field, typeMap) } : {}),
       binding,
     };
   });
@@ -571,6 +684,7 @@ const buildToolDefs = (prepared: readonly PreparedOperation[]): readonly ToolDef
     name: ToolName.make(p.toolName),
     description: p.description,
     inputSchema: p.inputSchema,
+    ...(p.outputSchema !== undefined ? { outputSchema: p.outputSchema } : {}),
     annotations: annotationsFor(p.binding),
   }));
 
@@ -954,6 +1068,70 @@ const makeGraphqlExtension = (ctx: PluginCtx<GraphqlStore>) => {
       };
     });
 
+  const persistIntrospectionSnapshot = (
+    slug: IntegrationSlug,
+    baseConfig: GraphqlIntegrationConfig,
+    introspectionJson: string,
+    description: string | undefined,
+  ) =>
+    Effect.gen(function* () {
+      const introspection = yield* parseIntrospectionJson(introspectionJson);
+      const { result } = yield* extract(introspection);
+      const prepared = prepareOperations(result.fields, introspection);
+      const snapshotJson = JSON.stringify({ data: introspection });
+      const introspectionHash = yield* sha256Hex(snapshotJson);
+      const config = GraphqlIntegrationConfig.make({
+        ...baseConfig,
+        introspectionHash,
+      });
+
+      yield* ctx.storage.putIntrospection(introspectionHash, snapshotJson);
+
+      yield* ctx.transaction(
+        Effect.gen(function* () {
+          yield* ctx.storage.replaceOperations(String(slug), toStoredOperations(slug, prepared));
+          const schemaDescription =
+            typeof (introspection as { description?: unknown }).description === "string"
+              ? ((introspection as { description?: string }).description ?? "").trim()
+              : "";
+          yield* ctx.core.integrations.update(slug, {
+            description: description?.trim() || schemaDescription || config.name,
+            config,
+          });
+        }),
+      );
+
+      return {
+        slug: String(slug),
+        name: config.name,
+        toolCount: prepared.length,
+      };
+    });
+
+  /** Attach a pre-built introspection snapshot to an existing integration that
+   *  was registered without one. No-op when the integration already stores a
+   *  snapshot hash. */
+  const attachIntrospectionSnapshot = (slugInput: string, introspectionJson: string) =>
+    Effect.gen(function* () {
+      const slug = IntegrationSlug.make(slugInput);
+      const record = yield* ctx.core.integrations.get(slug);
+      if (!record) {
+        return yield* new IntegrationNotFoundError({ slug });
+      }
+      const current = Option.getOrNull(decodeGraphqlIntegrationConfigOption(record.config));
+      if (current?.introspectionHash != null) {
+        return { slug: String(slug), name: current.name, toolCount: 0 };
+      }
+      const baseConfig =
+        current ??
+        GraphqlIntegrationConfig.make({
+          endpoint: "",
+          name: record.description,
+          authenticationTemplate: [],
+        });
+      return yield* persistIntrospectionSnapshot(slug, baseConfig, introspectionJson, undefined);
+    });
+
   const configureIntegration = (slug: string, input: GraphqlConfigureInput) =>
     Effect.gen(function* () {
       const record = yield* ctx.core.integrations.get(IntegrationSlug.make(slug));
@@ -1058,6 +1236,9 @@ const makeGraphqlExtension = (ctx: PluginCtx<GraphqlStore>) => {
   return {
     /** Register a GraphQL integration (introspects + persists operations). */
     addIntegration: (input: GraphqlAddIntegrationInput) => addIntegrationInternal(input),
+
+    /** Attach a pre-built introspection snapshot to an existing integration. */
+    attachIntrospectionSnapshot,
 
     /** Read the integration's stored config. */
     getIntegration: (slug: string) =>

@@ -21,6 +21,12 @@ type P_DBType = PostgreSQL.PgDatabase<
 >;
 
 const CREATE_MANY_BATCH_SIZE = 500;
+// Cloudflare D1 accepts up to 1000 statements per `batch()` call.
+const D1_BATCH_STATEMENT_LIMIT = 1000;
+
+type D1BatchDb = {
+  batch<T extends readonly unknown[]>(queries: T): Promise<{ readonly [K in keyof T]: unknown }>;
+};
 
 function buildWhere(
   toDrizzle: (col: AnyColumn) => ColumnType,
@@ -372,6 +378,25 @@ export function fromDrizzle(
 
       if (provider === "sqlite" || provider === "postgresql") {
         const out: { _id: unknown }[] = [];
+        const d1Batch = (db as Partial<D1BatchDb>).batch;
+        if (provider === "sqlite" && typeof d1Batch === "function") {
+          for (let i = 0; i < batches.length; i += D1_BATCH_STATEMENT_LIMIT) {
+            const slice = batches.slice(i, i + D1_BATCH_STATEMENT_LIMIT);
+            const queries = slice.map((batch) =>
+              (db as unknown as P_DBType)
+                .insert(drizzleTable as unknown as P_TableType)
+                .values(batch)
+                .returning({
+                  _id: (drizzleTable as unknown as P_TableType)[idField],
+                }),
+            );
+            const results = await d1Batch.call(db, queries);
+            for (const result of results) {
+              out.push(...(result as { _id: unknown }[]));
+            }
+          }
+          return out;
+        }
         for (const batch of batches) {
           out.push(
             ...(await (db as unknown as P_DBType)

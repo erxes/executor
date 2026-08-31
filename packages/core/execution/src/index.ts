@@ -18,6 +18,7 @@ export {
 } from "./description";
 export {
   EXECUTE_SKILL,
+  GRAPHQL_SKILL,
   CREATE_ARTIFACT_SKILL,
   SKILLS,
   findSkill,

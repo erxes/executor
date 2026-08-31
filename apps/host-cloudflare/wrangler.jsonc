@@ -2,8 +2,11 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "executor-cloudflare",
   "compatibility_date": "2025-04-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // Hosted integrations must use public routing. Private-origin fetches from an
+  // Executor custom domain can bypass TLS when the target is in the same zone.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "main": "src/worker.ts",
+  // routes are injected by scripts/deploy.sh per installation
   // Access configuration is set per installation after the first deploy.
   // Preserve those live bindings when this source config does not declare them.
   "keep_vars": true,
@@ -29,7 +32,7 @@
     {
       "binding": "DB",
       "database_name": "executor",
-      "database_id": "ae748ca1-032c-4427-a1a0-fe39db77d1a9",
+      "database_id": "8e0f791e-c9fa-4ce0-a3dd-fa36a03ca102",
     },
   ],
   // Plugin blob seam backend: multi-MB values (resolved OpenAPI specs,
@@ -71,12 +74,17 @@
   // secret-encryption key) is a SECRET, set it with
   // `wrangler secret put EXECUTOR_SECRET_KEY`, never in vars.
   "vars": {
+    // Keep normal Executor routes fail-closed until a real Access app replaces these values.
+    // Signed /os/* calls use CLOUDFLARE_OS_AUTH_SECRET instead.
+    "ACCESS_TEAM_DOMAIN": "darjs.cloudflareaccess.com",
+    "ACCESS_AUD": "4b0e36b2e0b981ad929a4657fabe04e855deb8bf77636f259f26f73dc822ae88",
     "ACCESS_NAME_CLAIM": "name",
     "ACCESS_GROUPS_CLAIM": "groups",
+    "ADMIN_EMAILS": "darjsavid@gmail.com",
     // Never preserve a production dev-auth override through keep_vars.
     "ENABLE_DEV_AUTH": "false",
-    "SELF_HOSTED_ORG_ID": "default",
-    "SELF_HOSTED_ORG_NAME": "Default",
+    "SELF_HOSTED_ORG_ID": "officenext.erxes.io",
+    "SELF_HOSTED_ORG_NAME": "OfficeNext",
     // VITE_PUBLIC_SITE_URL is intentionally unset: with no static URL the worker
     // derives the web base URL from each request's origin (RequestWebOrigin), so
     // secret/OAuth handoff links match whatever host the user actually reached.

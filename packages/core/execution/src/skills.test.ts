@@ -1,6 +1,13 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { EXECUTE_SKILL, SKILLS, findSkill, renderSkillsIndex, skillCatalogFor } from "./skills";
+import {
+  EXECUTE_SKILL,
+  GRAPHQL_SKILL,
+  SKILLS,
+  findSkill,
+  renderSkillsIndex,
+  skillCatalogFor,
+} from "./skills";
 
 describe("skills registry", () => {
   it("includes the execute skill with the full how-to body", () => {
@@ -15,8 +22,18 @@ describe("skills registry", () => {
     );
   });
 
+  it("teaches execute callers to fetch the GraphQL selection guide", () => {
+    expect(SKILLS).toContain(GRAPHQL_SKILL);
+    expect(EXECUTE_SKILL.body).toContain('skills({ name: "graphql" })');
+    expect(GRAPHQL_SKILL.body).toContain(
+      'select: "list { _id firstName lastName primaryEmail } totalCount"',
+    );
+    expect(GRAPHQL_SKILL.body).toContain("Use the same `select` input in artifact");
+  });
+
   it("finds a skill by exact name and misses unknown names", () => {
     expect(findSkill("execute")).toBe(EXECUTE_SKILL);
+    expect(findSkill("graphql")).toBe(GRAPHQL_SKILL);
     expect(findSkill("Execute")).toBeUndefined();
     expect(findSkill("nope")).toBeUndefined();
   });

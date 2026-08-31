@@ -36,8 +36,9 @@ const EXECUTE_SKILL_BODY = [
   '2. `const path = matches[0]?.path; if (!path) return "No matching tools found.";`',
   "3. `const details = await tools.describe.tool({ path });`",
   "4. Use `details.inputTypeScript` / `details.outputTypeScript` and `details.typeScriptDefinitions` for compact shapes.",
-  "5. Use `tools.executor.coreTools.connections.list({})` when you need live saved-connection inventory.",
-  "6. Call the tool: `const result = await tools.<path>(input);`",
+  '5. If `details.inputTypeScript` includes `select?: string`, fetch `skills({ name: "graphql" })` before calling the tool.',
+  "6. Use `tools.executor.coreTools.connections.list({})` when you need live saved-connection inventory.",
+  "7. Call the tool: `const result = await tools.<path>(input);`",
   "",
   "## Rules",
   "",
@@ -69,6 +70,52 @@ export const EXECUTE_SKILL: Skill = {
   summary:
     "How to call integrations from the execute sandbox: search the catalog, read a tool's shape, call it, emit results, and resume paused runs.",
   body: EXECUTE_SKILL_BODY,
+};
+
+const GRAPHQL_SKILL_BODY = [
+  "# graphql",
+  "",
+  "Call generated GraphQL tools with an explicit return-field selection.",
+  "",
+  "## Why `select` matters",
+  "",
+  "Generated GraphQL tools select scalar fields on the return type by default, plus one level of item scalars on list-of-object fields. Nested objects and connection fields still need an explicit `select`.",
+  "",
+  "`outputTypeScript` describes fields that are available to request. It does not mean every field is returned when `select` is omitted.",
+  "",
+  "## Workflow",
+  "",
+  "1. Call `tools.describe.tool({ path })`.",
+  "2. Confirm `inputTypeScript` includes `select?: string`.",
+  "3. Read the root return shape from `outputTypeScript`.",
+  "4. Pass the fields you need as GraphQL selection text.",
+  "5. Read the response under the tool's root field as shown in `outputTypeScript`.",
+  "",
+  "```ts",
+  "const result = await tools[path]({",
+  "  limit: 50,",
+  '  select: "list { _id firstName lastName primaryEmail } totalCount",',
+  "});",
+  "if (!result.ok) return result.error;",
+  "return result.data.customers;",
+  "```",
+  "",
+  "## Rules",
+  "",
+  "- Write fields for the GraphQL return type, not the operation root. Use `list { ... } totalCount`, not `customers { list { ... } }`.",
+  "- Do not wrap the whole string in braces. Executor adds them.",
+  "- `select` replaces the default selection. Include scalar fields such as `totalCount` when you still need them.",
+  "- Give every object or list a sub-selection: `list { _id name }`.",
+  "- Keep selections small. Ask only for fields the task uses.",
+  "- Use the same `select` input in artifact `queryOptions(...)` calls so the saved UI receives the rows it renders.",
+  "- If GraphQL reports `Cannot query field`, compare the selection with `outputTypeScript`; do not guess another field name.",
+].join("\n");
+
+export const GRAPHQL_SKILL: Skill = {
+  name: "graphql",
+  summary:
+    "How to use `select` with generated GraphQL tools so nested objects and list rows are returned, with the same input in artifacts.",
+  body: GRAPHQL_SKILL_BODY,
 };
 
 // The `create-artifact` how-to. Same reasoning as `execute`: the discovery-vs-render
@@ -615,6 +662,7 @@ export const ARTIFACT_STYLE_SKILL: Skill = {
 /** The full skill catalog. Hand-curated; keep it small. */
 export const SKILLS: readonly Skill[] = [
   EXECUTE_SKILL,
+  GRAPHQL_SKILL,
   CREATE_ARTIFACT_SKILL,
   ARTIFACT_STYLE_SKILL,
 ];
