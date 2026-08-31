@@ -40,7 +40,7 @@ const accessConfigErrorResponse = (missingVars: readonly string[]): Response =>
     },
   });
 
-const ERXES_INTEGRATION = "erxes-officenext";
+const DEFAULT_ERXES_INTEGRATION = "erxes-officenext";
 
 const executorRequest = (
   original: Request,
@@ -62,19 +62,31 @@ const executorRequest = (
   });
 };
 
+const parseIntegrationSlug = (raw: unknown): string | null => {
+  if (raw === undefined || raw === null || raw === "") return DEFAULT_ERXES_INTEGRATION;
+  if (typeof raw !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(raw)) return null;
+  return raw;
+};
+
 const provisionErxes = async (
   request: Request,
   app: (request: Request) => Promise<Response>,
 ): Promise<Response> => {
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 
-  let input: { endpoint?: unknown; cookie?: unknown };
+  let input: { endpoint?: unknown; cookie?: unknown; integration?: unknown };
   // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: malformed external JSON becomes a 400 response
   try {
-    input = (await request.json()) as { endpoint?: unknown; cookie?: unknown };
+    input = (await request.json()) as {
+      endpoint?: unknown;
+      cookie?: unknown;
+      integration?: unknown;
+    };
   } catch {
     return new Response("Invalid request", { status: 400 });
   }
+  const integration = parseIntegrationSlug(input.integration);
+  if (integration === null) return new Response("Invalid request", { status: 400 });
   if (
     typeof input.endpoint !== "string" ||
     typeof input.cookie !== "string" ||
@@ -86,16 +98,16 @@ const provisionErxes = async (
   }
 
   const existing = await app(
-    executorRequest(request, `/api/graphql/integrations/${ERXES_INTEGRATION}`, "GET"),
+    executorRequest(request, `/api/graphql/integrations/${integration}`, "GET"),
   );
   if (!existing.ok) return existing;
   if ((await existing.json()) === null) {
     const created = await app(
       executorRequest(request, "/api/graphql/integrations", "POST", {
         endpoint: input.endpoint,
-        slug: ERXES_INTEGRATION,
-        name: "OfficeNext",
-        description: "OfficeNext Erxes GraphQL API",
+        slug: integration,
+        name: integration,
+        description: `${integration} Erxes GraphQL API`,
         authenticationTemplate: [
           {
             slug: "cookie",
@@ -111,12 +123,12 @@ const provisionErxes = async (
   return app(
     executorRequest(request, "/api/connections", "POST", {
       owner: "user",
-      name: ERXES_INTEGRATION,
-      integration: ERXES_INTEGRATION,
+      name: integration,
+      integration,
       template: "cookie",
       value: input.cookie,
-      identityLabel: "OfficeNext",
-      description: "Your OfficeNext account",
+      identityLabel: integration,
+      description: `Your ${integration} account`,
     }),
   );
 };
