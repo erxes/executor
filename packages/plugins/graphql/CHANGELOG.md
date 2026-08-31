@@ -1,5 +1,17 @@
 # @executor-js/plugin-graphql
 
+## 1.6.1
+
+### Patch Changes
+
+- [`851daa7`](https://github.com/UsefulSoftwareCo/executor/commit/851daa7d4fa881700fbcdc954a204230cfb2ab2f) Thanks [@darjss](https://github.com/darjss)! - Expose bounded GraphQL return shapes and teach agents to request nested rows with explicit `select` clauses.
+
+- Updated dependencies []:
+  - @executor-js/api@1.4.64
+  - @executor-js/react@1.4.64
+  - @executor-js/sdk@1.6.1
+  - @executor-js/config@1.6.1
+
 ## 1.6.0
 
 ### Patch Changes
